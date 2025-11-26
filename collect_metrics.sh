@@ -39,16 +39,22 @@ if command -v ip >/dev/null 2>&1; then IFCONF_BIN="ip"; elif command -v ifconfig
 # ================================================
 collect_services() {
   services=("apache2" "mysql" "nginx" "ssh" "cron")
-  status_list=()
 
-  for s in "${services[@]}"; do
-    state=$(systemctl is-active "$s" 2>/dev/null || echo "unknown")
-    status_list+=("{\"service\":\"$s\",\"status\":\"$state\"}")
-  done
+  # Build a proper JSON array using jq directly
+  service_json=$(printf '%s\n' "${services[@]}" \
+    | while read svc; do
+        state=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+        printf '{"service":"%s","status":"%s"}\n' "$svc" "$state"
+      done \
+    | jq -s '.')
 
-  printf "%s\n" "$(jq -cn --arg host "$HOST" --arg ts "$STAMP" --argjson services "[${status_list[*]}]" \
-  '{type:"services", host:$host, ts:$ts, services:$services}')"
+  jq -cn \
+    --arg host "$HOST" \
+    --arg ts "$STAMP" \
+    --argjson services "$service_json" \
+    '{type:"services", host:$host, ts:$ts, services:$services}'
 }
+
 
 # ================================================
 # COLLECTORS
