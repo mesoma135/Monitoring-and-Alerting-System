@@ -61,7 +61,7 @@ process_alerts() {
     if [[ "$line" == ALERT_* ]]; then
       alert_count=$((alert_count + 1))    
       # Extract metric name and value
-      metric=$(echo "$line" | cut -d'_' -f2 | cut -d':' -f1)
+      metric=$(echo "$line" | cut -d'_' -f2- | cut -d':' -f1)
       value=$(echo "$line" | cut -d':' -f2)
      
       # Create alert message
