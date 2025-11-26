@@ -161,12 +161,13 @@ collect_logs() {
 # ================================================
 
 {
+  collect_services
   collect_load_mem_cpu
-  collect_disk
-  collect_procs
-  collect_network
-  collect_logs
-  collect_services   # <--- NEW
+ # collect_disk
+ # collect_procs
+  #collect_network
+  #collect_logs
+     # <--- NEW
 } >> "$OUT_FILE"
 
 echo "Data written to: $OUT_FILE"
