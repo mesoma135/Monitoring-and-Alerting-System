@@ -40,20 +40,18 @@ if command -v ip >/dev/null 2>&1; then IFCONF_BIN="ip"; elif command -v ifconfig
 collect_services() {
   services=("apache2" "mysql" "nginx" "ssh" "cron")
 
-  # Build a proper JSON array using jq directly
-  service_json=$(printf '%s\n' "${services[@]}" \
-    | while read svc; do
-        state=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
-        printf '{"service":"%s","status":"%s"}\n' "$svc" "$state"
-      done \
-    | jq -s '.')
+  service_array=$(for s in "${services[@]}"; do
+      state=$(systemctl is-active "$s" 2>/dev/null || echo "unknown")
+      printf '{"service":"%s","status":"%s"}\n' "$s" "$state"
+    done | jq -s '.')
 
   jq -cn \
     --arg host "$HOST" \
     --arg ts "$STAMP" \
-    --argjson services "$service_json" \
+    --argjson services "$service_array" \
     '{type:"services", host:$host, ts:$ts, services:$services}'
 }
+
 
 
 # ================================================
