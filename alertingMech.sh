@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # Configuration
-PROJ_DIR="$HOME/Documents/SystemsProgrammingProj/Monitoring-and-Alerting-System"
-THRESHOLD_OUTPUT="/home/kali/threshold_output.txt"
+
+PROJ_DIR="$(dirname "$0")"
+THRESHOLD_OUTPUT="$PROJ_DIR/threshold_output.txt"
 ALERT_LOG="$PROJ_DIR/system_alerts.log"
 EMAIL_RECIPIENTS="${EMAIL_RECIPIENTS:-m.tarun1012@gmail.com}"
 HOSTNAME="$(hostname)"
