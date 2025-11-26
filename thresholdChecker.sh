@@ -13,12 +13,33 @@ if [ ! -f "$METRICS_FILE" ]; then
   exit 1
 fi
 
-latest_line=$(tail -n 6 "$METRICS_FILE" | jq -s '.[-1]')
+# -------------------------
+# Extract latest metric blocks
+# -------------------------
 
-cpu=$(echo "$latest_line" | jq '.cpu.idle_pct // 0')
-mem_used=$(echo "$latest_line" | jq '.mem_bytes.total - .mem_bytes.free')
-mem_total=$(echo "$latest_line" | jq '.mem_bytes.total')
-disk=$(echo "$latest_line" | jq '.du_top[0].size // 0')
+latest_load=$(jq -s 'map(select(.type == "load_mem_cpu"))[-1]' "$METRICS_FILE")
+latest_disk=$(jq -s 'map(select(.type == "disk"))[-1]' "$METRICS_FILE")
+latest_services=$(jq -s 'map(select(.type == "services"))[-1]' "$METRICS_FILE")
+
+# -------------------------
+# Extract values
+# -------------------------
+
+# CPU (convert idle → busy)
+cpu_idle=$(echo "$latest_load" | jq '.cpu.idle_pct // 0')
+busy_cpu=$(echo "100 - $cpu_idle" | bc -l)
+
+# Memory %
+mem_used=$(echo "$latest_load" | jq '.mem_bytes.total - .mem_bytes.free // 0')
+mem_total=$(echo "$latest_load" | jq '.mem_bytes.total // 1')
+memory=$(echo "scale=2; ($mem_used / $mem_total) * 100" | bc -l)
+
+# Disk
+disk=$(echo "$latest_disk" | jq -r '.du_top[0].size // "0"')
+disk_clean=$(echo "$disk" | sed 's/[^0-9.]//g')
+
+# Services array
+services=$(echo "$latest_services" | jq -c '.services // []')
 
 # -------------------------
 # Threshold Check Function
@@ -35,16 +56,16 @@ check_threshold() {
   fi
 }
 
+# -------------------------
 # Resource checks
-check_threshold "$cpu" "$CPU_THRESHOLD" "CPU"
-memory=$(echo "scale=2; ($mem_used / $mem_total) * 100" | bc -l)
+# -------------------------
+check_threshold "$busy_cpu" "$CPU_THRESHOLD" "CPU"
 check_threshold "$memory" "$MEM_THRESHOLD" "MEMORY"
-check_threshold "$disk" "$DISK_THRESHOLD" "DISK"
+check_threshold "$disk_clean" "$DISK_THRESHOLD" "DISK"
 
 # -------------------------
-# Service Status Checks (NEW)
+# Service Status Checks
 # -------------------------
-services=$(echo "$latest_line" | jq -c '.services // []')
 
 echo "$services" | jq -c '.[]' | while read item; do
   svc=$(echo "$item" | jq -r '.service')
@@ -56,7 +77,7 @@ echo "$services" | jq -c '.[]' | while read item; do
     echo "OK_SERVICE_${svc^^}:$status"
   fi
 done
-  
+
 # -------------------------
 # Anomaly Detector
 # -------------------------
