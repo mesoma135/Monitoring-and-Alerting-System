@@ -1,5 +1,4 @@
 #!/bin/bash
-
 echo "THRESHOLD CHECKER RAN at $(date)"
 
 METRICS_FILE="$(dirname "$0")/metrics/metrics-$(date -u +%Y%m%d).jsonl"
@@ -14,37 +13,42 @@ if [ ! -f "$METRICS_FILE" ]; then
   exit 1
 fi
 
-# -------------------------------------------------------
-# Extract the MOST RECENT LINE for each type
-# -------------------------------------------------------
+# -------------------------
+# Extract latest metric blocks
+# -------------------------
 
-latest_services=$(grep '"type":"services"' "$METRICS_FILE" | tail -n 1)
-latest_cpu=$(grep '"type":"load_mem_cpu"' "$METRICS_FILE" | tail -n 1)
-latest_disk=$(grep '"type":"disk"' "$METRICS_FILE" | tail -n 1)
+latest_load=$(jq -s 'map(select(.type == "load_mem_cpu"))[-1]' "$METRICS_FILE")
+latest_disk=$(jq -s 'map(select(.type == "disk"))[-1]' "$METRICS_FILE")
+latest_services=$(jq -s 'map(select(.type == "services"))[-1]' "$METRICS_FILE")
 
-# -------------------------------------------------------
-# PARSE CPU & MEMORY
-# -------------------------------------------------------
+# -------------------------
+# Extract values
+# -------------------------
 
-cpu=$(echo "$latest_cpu" | jq '.cpu.idle_pct // 0')
-mem_used=$(echo "$latest_cpu" | jq '.mem_bytes.total - .mem_bytes.free')
-mem_total=$(echo "$latest_cpu" | jq '.mem_bytes.total')
+# CPU (convert idle → busy)
+cpu_idle=$(echo "$latest_load" | jq '.cpu.idle_pct // 0')
+busy_cpu=$(echo "100 - $cpu_idle" | bc -l)
+
+# Memory %
+mem_used=$(echo "$latest_load" | jq '.mem_bytes.total - .mem_bytes.free // 0')
+mem_total=$(echo "$latest_load" | jq '.mem_bytes.total // 1')
 memory=$(echo "scale=2; ($mem_used / $mem_total) * 100" | bc -l)
 
-# -------------------------------------------------------
-# PARSE DISK
-# -------------------------------------------------------
+# Disk
+disk=$(echo "$latest_disk" | jq -r '.du_top[0].size // "0"')
+disk_clean=$(echo "$disk" | sed 's/[^0-9.]//g')
 
-disk=$(echo "$latest_disk" | jq '.df[0].used // 0')
+# Services array
+services=$(echo "$latest_services" | jq -c '.services // []')
 
-# Helper
+# -------------------------
+# Threshold Check Function
+# -------------------------
 check_threshold() {
   local value=$1
   local threshold=$2
   local name=$3
-
   value=$(echo "$value" | sed 's/[^0-9.]//g')
-
   if (( $(echo "$value > $threshold" | bc -l) )); then
     echo "ALERT_${name}_HIGH:$value"
   else
@@ -52,33 +56,32 @@ check_threshold() {
   fi
 }
 
-# -------------- RESOURCE ALERTS -----------------
-
-check_threshold "$cpu" "$CPU_THRESHOLD" "CPU"
+# -------------------------
+# Resource checks
+# -------------------------
+check_threshold "$busy_cpu" "$CPU_THRESHOLD" "CPU"
 check_threshold "$memory" "$MEM_THRESHOLD" "MEMORY"
-check_threshold "$disk" "$DISK_THRESHOLD" "DISK"
+check_threshold "$disk_clean" "$DISK_THRESHOLD" "DISK"
 
-# -------------------------------------------------------
-# SERVICE ALERTS (THIS FIXES YOUR ISSUE)
-# -------------------------------------------------------
+# -------------------------
+# Service Status Checks
+# -------------------------
 
-services=$(echo "$latest_services" | jq -c '.services // []')
+printf "%s" "$services" | jq -c '.[]' | while read item; do
+    svc=$(printf "%s" "$item" | jq -r '.service')
+    status=$(printf "%s" "$item" | jq -r '.status')
 
-echo "$services" | jq -c '.[]' | while read item; do
-  svc=$(echo "$item" | jq -r '.service')
-  status=$(echo "$item" | jq -r '.status')
-
-  if [ "$status" != "active" ]; then
-    echo "ALERT_SERVICE_${svc^^}:$status"
-  else
-    echo "OK_SERVICE_${svc^^}:$status"
-  fi
+    if [ "$status" != "active" ]; then
+        echo "ALERT_SERVICE_${svc^^}:$status"
+    else
+        echo "OK_SERVICE_${svc^^}:$status"
+    fi
 done
 
-# -------------------------------------------------------
-# ANOMALY DETECTION (unchanged)
-# -------------------------------------------------------
 
+# -------------------------
+# Anomaly Detector
+# -------------------------
 HISTORY_FILE="/tmp/error_history.txt"
 touch "$HISTORY_FILE"
 
