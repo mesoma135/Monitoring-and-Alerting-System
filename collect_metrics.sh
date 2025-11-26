@@ -5,9 +5,9 @@ set -Eeuo pipefail
 # CONFIG
 # ================================================
 
-OUT_DIR="${OUT_DIR:-$HOME/sysmon}"
-SYSLOG="${SYSLOG:-/var/log/syslog}"       # For Kali/Ubuntu. Try /var/log/messages if needed.
-LOG_GLOB="${LOG_GLOB:-}"                  # Optional: "app1.log app2.log"
+OUT_DIR="$(dirname "$0")/metrics"
+SYSLOG="${SYSLOG:-/var/log/syslog}"       # For Kali/Ubuntu
+LOG_GLOB="${LOG_GLOB:-}"                 
 DU_TOP_PATH="${DU_TOP_PATH:-/}"
 DU_TOP_N="${DU_TOP_N:-10}"
 
@@ -22,7 +22,7 @@ touch "$OUT_FILE"
 # DEPENDENCY CHECKS
 # ================================================
 
-reqs=(top df du ps lsof grep awk sed date uname jq)
+reqs=(top df du ps lsof grep awk sed date uname jq systemctl)
 for r in "${reqs[@]}"; do
   command -v "$r" >/dev/null 2>&1 || {
     echo "ERROR: Missing dependency: $r" >&2
@@ -35,20 +35,33 @@ if command -v ss >/dev/null 2>&1; then NETSTAT_BIN="ss"; elif command -v netstat
 if command -v ip >/dev/null 2>&1; then IFCONF_BIN="ip"; elif command -v ifconfig >/dev/null 2>&1; then IFCONF_BIN="ifconfig"; else echo "ERROR: Need ip or ifconfig"; exit 1; fi
 
 # ================================================
+# SERVICE CHECKER (NEW)
+# ================================================
+collect_services() {
+  services=("apache2" "mysql" "nginx" "ssh" "cron")
+  status_list=()
+
+  for s in "${services[@]}"; do
+    state=$(systemctl is-active "$s" 2>/dev/null || echo "unknown")
+    status_list+=("{\"service\":\"$s\",\"status\":\"$state\"}")
+  done
+
+  printf "%s\n" "$(jq -cn --arg host "$HOST" --arg ts "$STAMP" --argjson services "[${status_list[*]}]" \
+  '{type:"services", host:$host, ts:$ts, services:$services}')"
+}
+
+# ================================================
 # COLLECTORS
 # ================================================
 
 collect_load_mem_cpu() {
-  # Load averages
   load=$(awk '{print $1","$2","$3}' /proc/loadavg)
 
-  # Memory (always works across all Linux)
   mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2*1024}')
   mem_free=$(grep MemAvailable /proc/meminfo | awk '{print $2*1024}')
   swap_total=$(grep SwapTotal /proc/meminfo | awk '{print $2*1024}')
   swap_free=$(grep SwapFree /proc/meminfo | awk '{print $2*1024}')
 
-  # CPU idle (universal)
   cpu_idle=$(grep 'cpu ' /proc/stat | awk '{idle=$5; total=$2+$3+$4+$5+$6+$7+$8; printf "%.2f", (idle/total)*100}')
 
   jq -cn --arg host "$HOST" --arg ts "$STAMP" \
@@ -148,6 +161,7 @@ collect_logs() {
   collect_procs
   collect_network
   collect_logs
+  collect_services   # <--- NEW
 } >> "$OUT_FILE"
 
 echo "Data written to: $OUT_FILE"
